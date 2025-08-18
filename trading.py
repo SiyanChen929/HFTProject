@@ -25,36 +25,6 @@ sh = logging.StreamHandler()
 sh.setFormatter(fmt)
 logger.addHandler(sh)
 
-def read_text_with_fallback(path: str) -> str:
-    """尝试多种编码读取文本；若是 csv 直接返回文件路径标记。"""
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"找不到文件：{p.resolve()}")
-    # 如果像 .csv 这类可直接 read_csv 的，返回 None 表示走文件直读
-    if p.suffix.lower() in {".csv"}:
-        return None
-    encs = ["utf-8", "utf-8-sig", "gb18030", "gbk", "cp1252"]
-    for enc in encs:
-        try:
-            with open(p, "r", encoding=enc) as f:
-                text = f.read()
-            logger.info(f"使用编码 {enc} 读取文本成功")
-            return text
-        except UnicodeDecodeError:
-            continue
-    # 兜底：替换非法字符
-    with open(p, "r", encoding="utf-8", errors="replace") as f:
-        text = f.read()
-    logger.warning("精确识别编码失败，使用 utf-8(errors=replace) 读取，可能有少量字符被替换")
-    return text
-
-def load_df(path: str) -> pd.DataFrame:
-    text = read_text_with_fallback(path)
-    if text is None:
-        df = pd.read_csv(path)
-    else:
-        df = pd.read_csv(StringIO(text))
-    return df
 
 def to_num(df: pd.DataFrame, cols):
     for c in cols:
@@ -64,8 +34,7 @@ def to_num(df: pd.DataFrame, cols):
 
 def main():
     # 1) 读数据
-    df = load_df(DATA_PATH)
-
+    df = pd.read_csv(DATA_PATH)
     # 2) 必要列
     need_cols = ["TRADINGTIME", "SELLPRICE01", "BUYPRICE01", "LASTPRICE"]
     missing = [c for c in need_cols if c not in df.columns]

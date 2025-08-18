@@ -1,7 +1,7 @@
 期末价格(last): 1723.3
-持仓(position): 12819
-均价(avg_cost): 1730.1996
-现金(cash): -22179428.40
-权益(equity): -88445.70
-未实现盈亏(unrealized PnL): -88445.70
-交易尝试次数: 25981，成功 12819 次，失败 13162 次
+持仓(position): 0
+均价(avg_cost): N/A
+现金(cash): -6686.10
+权益(equity): -6686.10
+未实现盈亏(unrealized PnL): 0.00
+记录条数: 55265，BUY_OK=12819，BUY_FAIL=13162，SELL_OK=12819，SELL_FAIL=0
