@@ -42,7 +42,7 @@ def read_text_with_fallback(path: str) -> str:
             return text
         except UnicodeDecodeError:
             continue
-    # 兜底：替换非法字符
+    # 替换非法字符
     with open(p, "r", encoding="utf-8", errors="replace") as f:
         text = f.read()
     logger.warning("精确识别编码失败，使用 utf-8(errors=replace) 读取，可能有少量字符被替换")
@@ -112,14 +112,13 @@ def main():
             order_price = float(bid)
             order_qty = QTY
 
-            # ====== 价格撮合规则（你新指定的）======
             # 只有当 (last <= order_price) 或 (当前买一 <= order_price) 时才视为成功
             cond_last = (not np.isnan(last)) and (last <= order_price)
             cond_bid  = (not np.isnan(bid))  and (bid  <= order_price)
             success = cond_last or cond_bid
 
             if success:
-                # 成交价：采用我的挂单价（如需价格改善，可改为 min(order_price, last)）
+                # 成交价：采用我的挂单价,可改为 min(order_price, last)
                 fill_price = order_price
                 old_pos = position
                 position += order_qty
