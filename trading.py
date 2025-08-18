@@ -66,11 +66,8 @@ def main():
     # 1) 读数据
     df = load_df(DATA_PATH)
 
-    # 2) 检查必需列
-    need_cols = [
-        "TRADINGTIME", "SELLPRICE01", "BUYPRICE01",
-        "LASTPRICE"
-    ]
+    # 2) 必要列
+    need_cols = ["TRADINGTIME", "SELLPRICE01", "BUYPRICE01", "LASTPRICE"]
     missing = [c for c in need_cols if c not in df.columns]
     if missing:
         raise ValueError(f"数据缺少必要列：{missing}")
@@ -80,74 +77,72 @@ def main():
     df = to_num(df, ["SELLPRICE01", "BUYPRICE01", "LASTPRICE"])
     df = df.sort_values("TRADINGTIME").reset_index(drop=True)
 
-    # 4) 回测状态
+    # 4) 状态
     cash = 0.0
     position = 0
     avg_cost = 0.0
     trades = []
 
-    # 5) 遍历逐笔
-    for _, row in df.iterrows():
-        ts   = row["TRADINGTIME"]
-        ask  = row["SELLPRICE01"]
-        bid  = row["BUYPRICE01"]
-        last = row["LASTPRICE"]
+    # 5) 用 (t-1) 触发、在 t 判定
+    for i in range(1, len(df)):
+        prev = df.iloc[i-1]
+        curr = df.iloc[i]
 
-        # 跳过异常
-        if np.isnan(ask) or np.isnan(bid):
+        t_prev = prev["TRADINGTIME"]
+        ask_prev = prev["SELLPRICE01"]
+        bid_prev = prev["BUYPRICE01"]
+        if np.isnan(ask_prev) or np.isnan(bid_prev):
             continue
 
-        spread = ask - bid
+        spread_prev = ask_prev - bid_prev
 
-        # 触发条件：卖一-买一 < 阈值
-        if spread < SPREAD_TH:
-            if ONLY_WHEN_FLAT and position != 0:
-                logger.info(f"{ts} | 触发信号但已有持仓 position={position}，跳过下单")
-                trades.append({"time": ts, "action": "BUY_SIGNAL_SKIP",
-                               "reason": "has_position", "spread": spread,
-                               "order_price": float(bid), "ask": ask, "bid": bid, "last": last})
-                continue
-
-            # 我挂单的买一价（被动买单）
-            order_price = float(bid)
+        # 在上一个 tick（t-1）是否产生买入挂单？
+        if spread_prev < SPREAD_TH and (not ONLY_WHEN_FLAT or position == 0):
+            order_price = float(bid_prev)      # 上一个tick的买一价 = 挂单价
             order_qty = QTY
 
-            # ====== 价格撮合规则（你新指定的）======
-            # 只有当 (last <= order_price) 或 (当前买一 <= order_price) 时才视为成功
-            cond_last = (not np.isnan(last)) and (last <= order_price)
-            cond_bid  = (not np.isnan(bid))  and (bid  <= order_price)
+            # 在当前 tick（t）进行价格撮合判定
+            last_curr = curr["LASTPRICE"]
+            bid_curr  = curr["BUYPRICE01"]
+
+            cond_last = (pd.notna(last_curr) and last_curr <= order_price)  # 最新成交价 <= 上一tick挂单价
+            cond_bid  = (pd.notna(bid_curr)  and bid_curr  <  bid_prev)     # 现买一 < 上一tick的买一
+
             success = cond_last or cond_bid
 
             if success:
-                # 成交价：采用我的挂单价（如需价格改善，可改为 min(order_price, last)）
-                fill_price = order_price
+                fill_price = order_price  # 成交价按挂单价；如需价优可用 min(order_price, last_curr)
                 old_pos = position
                 position += order_qty
                 cash -= fill_price * order_qty
                 avg_cost = fill_price if old_pos == 0 else (avg_cost*old_pos + fill_price*order_qty) / (old_pos + order_qty)
 
-                reason = "by_lastprice" if cond_last else "by_bid_condition"
-                msg = (f"{ts} | BUY 成功 qty={order_qty} price={fill_price:.4f} "
-                       f"reason={reason} spread={spread:.4f} pos={position} cash={cash:.2f}")
+                reason = "by_last_vs_prev_order" if cond_last else "bid_drop_vs_prev"
+                msg = (f"{curr['TRADINGTIME']} | BUY 成功 qty={order_qty} price={fill_price:.4f} "
+                       f"reason={reason} prev_spread={spread_prev:.4f} pos={position} cash={cash:.2f}")
                 logger.info(msg)
                 trades.append({
-                    "time": ts, "action": "BUY_OK", "qty": order_qty,
-                    "price": fill_price, "spread": spread, "reason": reason,
-                    "order_price": order_price, "ask": ask, "bid": bid, "last": last,
+                    "time": curr["TRADINGTIME"], "action": "BUY_OK", "qty": order_qty,
+                    "price": fill_price, "prev_spread": spread_prev, "reason": reason,
+                    "prev_order_price": order_price, "prev_bid": bid_prev, "prev_ask": ask_prev, "t_prev": t_prev,
+                    "curr_bid": bid_curr, "curr_last": last_curr,
                     "position": position, "cash": cash
                 })
             else:
-                # 撮合失败
-                msg = (f"{ts} | BUY 失败（价格条件不满足） "
-                       f"order_price={order_price}, last={last}, bid_now={bid}, spread={spread:.4f}")
+                msg = (f"{curr['TRADINGTIME']} | BUY 失败（价格条件不满足） "
+                       f"prev_order_price={order_price}, curr_last={last_curr}, "
+                       f"curr_bid={bid_curr}, prev_bid={bid_prev}, prev_spread={spread_prev:.4f}")
                 logger.warning(msg)
                 trades.append({
-                    "time": ts, "action": "BUY_FAIL", "qty": order_qty,
-                    "price": order_price, "spread": spread,
-                    "order_price": order_price, "ask": ask, "bid": bid, "last": last,
+                    "time": curr["TRADINGTIME"], "action": "BUY_FAIL", "qty": order_qty,
+                    "price": order_price, "prev_spread": spread_prev,
+                    "prev_order_price": order_price, "prev_bid": bid_prev, "prev_ask": ask_prev, "t_prev": t_prev,
+                    "curr_bid": bid_curr, "curr_last": last_curr,
                     "reason": "price_conditions_not_met",
                     "position": position, "cash": cash
                 })
+
+        # 若上一tick未触发下单，这一tick不做任何判定
 
     # 6) 期末评估
     last_price = float(df["LASTPRICE"].dropna().iloc[-1]) if df["LASTPRICE"].notna().any() else np.nan
